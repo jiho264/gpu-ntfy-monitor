@@ -1,0 +1,8 @@
+# nothing user-specific is ever committed: settings, topic, samples, state
+config
+*.csv
+*.log
+*.bak*
+*.tmp
+.env
+.DS_Store

@@ -1,0 +1,11 @@
+# Example ~/.ssh/config entries. gpu-ntfy-monitor only uses the host alias, so your own keys and
+# accounts are used as they are. It runs ssh with BatchMode=yes, so key auth must work without a prompt.
+Host gpu-server-1
+    HostName gpu-server-1.example.org
+    User your-username
+    IdentityFile ~/.ssh/id_ed25519
+
+Host gpu-server-2
+    HostName 192.0.2.10
+    User your-username
+    IdentityFile ~/.ssh/id_ed25519

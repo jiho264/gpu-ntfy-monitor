@@ -1,0 +1,32 @@
+# gpu-ntfy-monitor settings. Copy to ~/.config/gpu-ntfy-monitor/config and edit.
+# This file is sourced by bash. Keep it private (chmod 600): the topic acts as a password.
+
+# ntfy server and topic. Anyone who knows the topic can read and post to it, so make it long and random,
+# e.g.  echo "gpu-$(LC_ALL=C tr -dc a-z0-9 </dev/urandom | head -c 50)"
+NTFY_SERVER=https://ntfy.sh
+TOPIC=change-me-to-a-long-random-string
+
+# Servers to watch: host aliases from ~/.ssh/config (key auth, no password prompt).
+HOSTS=(gpu-server-1 gpu-server-2)
+
+# Alert threshold in °C per host: a host is "hot" 🔥 when ALL of its GPUs are at or above it
+# (judged on the 5-minute average). Hosts without an entry are never hot.
+declare -A LIMIT=([gpu-server-1]=70 [gpu-server-2]=75)
+
+# Optional CPU temperature per host, "chip:label" as printed by `sensors` on that host.
+# Hosts without an entry show GPU values only.
+declare -A CPU_SENSOR=([gpu-server-1]="coretemp-isa-0000:Package")
+
+# Periodic report every N minutes, aligned to midnight (60 = on the hour, 30 = :00 and :30). 0 = off.
+REPORT_EVERY_MINUTES=60
+
+# on = also push immediately (every minute while it lasts) when a host is hot or unreachable. off = reports only.
+ALERTS=on
+
+# ntfy priorities: 3 = default, 4 = high (see https://docs.ntfy.sh/publish/#message-priority)
+PRIO_NORMAL=3
+PRIO_ALERT=4
+
+# Days of samples to keep, and the averaging window in seconds (295 = the last 5 one-minute samples).
+LOG_DAYS=7
+WINDOW_SECONDS=295

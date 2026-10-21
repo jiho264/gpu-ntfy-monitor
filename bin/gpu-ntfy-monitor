@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# gpu-ntfy-monitor: samples GPU servers over ssh once a minute (run it from cron) and pushes the
+# 5-minute average to ntfy, as a periodic report and/or an immediate alert.
+# Usage: gpu-ntfy-monitor [--test | --dry-run]
+#   --test     send the report now, regardless of the schedule
+#   --dry-run  like --test, but print the message instead of sending it
+CONFIG=${GPU_NTFY_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/gpu-ntfy-monitor/config}
+STATE_DIR=${XDG_STATE_HOME:-$HOME/.local/state}/gpu-ntfy-monitor
+MODE=${1:-}
+case "$MODE" in ""|--test|--dry-run) ;; *) echo "usage: gpu-ntfy-monitor [--test | --dry-run]" >&2; exit 2 ;; esac
+
+# defaults, overridden by the config file
+NTFY_SERVER=https://ntfy.sh
+TOPIC=
+HOSTS=()
+declare -A LIMIT=() CPU_SENSOR=()
+REPORT_EVERY_MINUTES=60   # 0 = no periodic report
+ALERTS=on                 # on = push immediately when a host is hot or unreachable
+PRIO_NORMAL=3
+PRIO_ALERT=4
+LOG_DAYS=7
+WINDOW_SECONDS=295        # with 1-min sampling this averages the last 5 samples
+
+[ -r "$CONFIG" ] || { echo "config not found: $CONFIG" >&2; exit 1; }
+source "$CONFIG"
+[ -n "$TOPIC" ] && [ ${#HOSTS[@]} -gt 0 ] || { echo "TOPIC and HOSTS must be set in $CONFIG" >&2; exit 1; }
+
+mkdir -p "$STATE_DIR"
+LOG=$STATE_DIR/samples.csv
+# skip if the previous run is still going (a manual run waits up to 30 s instead)
+exec 9>"$STATE_DIR/lock"
+if [ -n "$MODE" ]; then flock -w 30 9 || exit 1; else flock -n 9 || exit 0; fi
+date "+%F %T" > "$STATE_DIR/last_run"
+
+# remote side: one line per value, in this order: cpu temp, mean utilization (%), mean power (W), temp of each GPU
+GPU_QUERY=$(cat <<'EOF'
+nvidia-smi --query-gpu=temperature.gpu,utilization.gpu,power.draw --format=csv,noheader,nounits | awk -F, '{ t[NR] = int($1); u += $2; p += $3 } END { if (NR) { printf "%d\n%d\n", u / NR + 0.5, p / NR + 0.5; for (i = 1; i <= NR; i++) print t[i] } }'
+EOF
+)
+
+now=$(date +%s); stamp=$(date -d @$now '+%F %T')
+declare -A failed
+tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+
+# 1) sample every host in parallel; the remote command runs under bash whatever the login shell is
+for h in "${HOSTS[@]}"; do
+  if [ -n "${CPU_SENSOR[$h]:-}" ]; then   # "chip:label", as printed by `sensors`
+    chip=${CPU_SENSOR[$h]%%:*}; label=${CPU_SENSOR[$h]#*:}
+    cpu_cmd="sensors $chip 2>/dev/null | grep -F -- '$label' | grep -oE '\+[0-9]+' | head -1 | tr -d +"
+  else
+    cpu_cmd="echo -"
+  fi
+  cmd="cpu=\$($cpu_cmd); echo \"\${cpu:-NA}\"; $GPU_QUERY"
+  ssh -o BatchMode=yes -o ConnectTimeout=10 "$h" bash -s <<< "$cmd" > "$tmp/$h" 2>/dev/null &
+done
+wait
+
+# append one CSV row per host: time,epoch,host,cpu,util,power,gpu temps... (NA = query failed, - = no cpu sensor)
+for h in "${HOSTS[@]}"; do
+  vals=$(paste -sd, "$tmp/$h")
+  if ! [[ $vals =~ ^(-|NA|[0-9]+)(,[0-9]+){3,}$ ]] || [[ $vals == NA,* ]]; then
+    failed[$h]=1; vals=NA
+  fi
+  echo "$stamp,$now,$h,$vals" >> "$LOG"
+done
+
+# 2) keep only the last LOG_DAYS days
+awk -F, -v c=$((now - LOG_DAYS * 86400)) '$2 >= c' "$LOG" > "$LOG.tmp" && mv "$LOG.tmp" "$LOG"
+
+# 3) per-host, per-column average over the window (failed samples ignored, rounded)
+declare -A AVG
+while read -r h rest; do AVG[$h]=$rest; done < <(awk -F, -v s=$((now - WINDOW_SECONDS)) '
+  $2 >= s && $4 != "NA" {
+    for (i = 4; i <= NF; i++) if ($i ~ /^[0-9]+$/) { sum[$3, i] += $i; n[$3, i]++ }
+    if (NF > m[$3]) m[$3] = NF; seen[$3] = 1
+  }
+  END {
+    for (h in seen) {
+      printf "%s", h
+      for (i = 4; i <= m[h]; i++) printf " %s", (n[h, i] ? int(sum[h, i] / n[h, i] + 0.5) : "NA")
+      printf "\n"
+    }
+  }' "$LOG")
+
+# 4) build the message
+msg=""; alert=0
+for h in "${HOSTS[@]}"; do
+  read -ra a <<< "${AVG[$h]:-}"
+  cpu=${a[0]:-NA}; util=${a[1]:-NA}; pwr=${a[2]:-NA}; g=("${a[@]:3}")
+  gmin=$(printf '%s\n' "${g[@]}" | grep -E '^[0-9]+$' | sort -n | head -1)
+  want_cpu=0; [ -n "${CPU_SENSOR[$h]:-}" ] && want_cpu=1
+  if [ -n "${failed[$h]:-}" ] || [ -z "$gmin" ] || [ "$util" = NA ] || { [ $want_cpu -eq 1 ] && [ "$cpu" = NA ]; }; then
+    line="⚠️ $h: FAILED"; alert=1
+  else
+    icon=✅
+    # hot = ALL gpus of the host are at or above its threshold
+    if [ -n "${LIMIT[$h]:-}" ] && [ "$gmin" -ge "${LIMIT[$h]}" ]; then icon=🔥; alert=1; fi
+    line="$icon $h: "
+    [ $want_cpu -eq 1 ] && line+="${cpu}°C | "
+    line+="$(IFS=,; echo "${g[*]}")°C | ${util}% | ${pwr}W"
+  fi
+  msg+="$line"$'\n'
+done
+msg=${msg%$'\n'}
+
+# 5) decide whether to send: scheduled report, or an alert, or a manual run
+send=0
+[ -n "$MODE" ] && send=1
+[ "$ALERTS" = on ] && [ $alert -eq 1 ] && send=1
+if [ "$REPORT_EVERY_MINUTES" -gt 0 ] && [ $(( (10#$(date +%H) * 60 + 10#$(date +%M)) % REPORT_EVERY_MINUTES )) -eq 0 ]; then send=1; fi
+[ $send -eq 1 ] || exit 0
+
+prio=$PRIO_NORMAL; [ $alert -eq 1 ] && prio=$PRIO_ALERT
+title=$(date "+%F, %T")
+if [ "$MODE" = --dry-run ]; then
+  printf 'Title: %s\nPriority: %s\n%s\n' "$title" "$prio" "$msg"
+  exit 0
+fi
+if ! curl -sf --max-time 10 -H "Title: $title" -H "Priority: $prio" -d "$msg" "$NTFY_SERVER/$TOPIC" >/dev/null; then
+  [ -n "$MODE" ] && echo "sending to $NTFY_SERVER failed" >&2
+  exit 1
+fi
