@@ -18,7 +18,8 @@ This repo is a GPU/CPU temperature monitor that pushes to ntfy (`bin/gpu-ntfy-mo
 4. **Thresholds.** Query each server once (`nvidia-smi --query-gpu=temperature.gpu,utilization.gpu,power.draw --format=csv`) and show the temperatures. Ask for a threshold in °C per server (a server is hot when all its GPUs are at or above it). There is no default: the right value depends on the hardware and cooling. Servers may be left without one.
 5. **Notifications.** Ask, with defaults:
    - periodic report every N minutes (default 60, aligned to midnight; 0 = none),
-   - immediate alerts when hot or unreachable (default on; explain that this pushes every minute while the condition lasts),
+   - immediate alerts when hot or unreachable (default on),
+   - the alert cooldown in minutes (default 30): the same alert, for the same server and the same reason (hot or unreachable), is not repeated within this time; a reason that clears and returns alerts at once; 0 = every minute,
    - priorities (default 3 for reports, 4 for alerts),
    - how long to keep samples (default 7 days).
 6. **ntfy.** Ask whether to use the public `https://ntfy.sh` (default) or their own server. Generate the topic with `echo "gpu-$(LC_ALL=C tr -dc a-z0-9 </dev/urandom | head -c 50)"`. Explain that the topic works as a password and that they must subscribe to it in the ntfy app.
@@ -35,4 +36,5 @@ This repo is a GPU/CPU temperature monitor that pushes to ntfy (`bin/gpu-ntfy-mo
 
 - The whole tool is `bin/gpu-ntfy-monitor`; `config.example` documents every setting and must be kept in sync with the defaults at the top of the script and with the table in `README.md`.
 - After a change: `bash -n bin/gpu-ntfy-monitor`, then test on a Linux host with a scratch config (`GPU_NTFY_CONFIG`, `XDG_STATE_HOME`) and a throwaway topic, using `--dry-run` and `--test`.
+- Alert cooldown: run the script without flags (the cron way; `--test` and `--dry-run` never touch the `alerts` state) with `REPORT_EVERY_MINUTES=0`, one hot host (a low `LIMIT`) and one nonexistent host. Expect one push at the first run and none at the second; edit the epoch in `alerts` to age one entry and expect a push; clear the hot reason (high `LIMIT`), bring it back and expect an immediate push; with `ALERT_COOLDOWN_MINUTES=0` expect a push per run. ntfy's message cache lags by a few seconds, so wait before counting messages.
 - This is a public repo. Examples use only generic names (`gpu-server-1`, `example.org`, `192.0.2.x`). Before every commit and push, scan the tree and the git history for real host names, user names, e-mail addresses, IP addresses, topics and tokens.

@@ -20,8 +20,13 @@ declare -A CPU_SENSOR=([gpu-server-1]="coretemp-isa-0000:Package")
 # Periodic report every N minutes, aligned to midnight (60 = on the hour, 30 = :00 and :30). 0 = off.
 REPORT_EVERY_MINUTES=60
 
-# on = also push immediately (every minute while it lasts) when a host is hot or unreachable. off = reports only.
+# on = also push immediately when a host is hot (all its GPUs at or above its threshold) or unreachable. off = reports only.
 ALERTS=on
+
+# Cooldown of immediate alerts, in minutes, kept separately for each host and each reason (hot / unreachable):
+# the same alert is not pushed again within this time. A reason that clears and comes back alerts at once.
+# 0 = push every minute while the condition lasts.
+ALERT_COOLDOWN_MINUTES=30
 
 # ntfy priorities: 3 = default, 4 = high (see https://docs.ntfy.sh/publish/#message-priority)
 PRIO_NORMAL=3

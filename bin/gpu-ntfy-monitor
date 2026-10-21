@@ -16,6 +16,7 @@ HOSTS=()
 declare -A LIMIT=() CPU_SENSOR=()
 REPORT_EVERY_MINUTES=60   # 0 = no periodic report
 ALERTS=on                 # on = push immediately when a host is hot or unreachable
+ALERT_COOLDOWN_MINUTES=30 # per host and reason (hot / unreachable): no repeat alert within this time; 0 = every minute
 PRIO_NORMAL=3
 PRIO_ALERT=4
 LOG_DAYS=7
@@ -83,18 +84,18 @@ while read -r h rest; do AVG[$h]=$rest; done < <(awk -F, -v s=$((now - WINDOW_SE
   }' "$LOG")
 
 # 4) build the message
-msg=""; alert=0
+msg=""; alert=0; active=()   # active = alert conditions now, as "host|down" or "host|hot"
 for h in "${HOSTS[@]}"; do
   read -ra a <<< "${AVG[$h]:-}"
   cpu=${a[0]:-NA}; util=${a[1]:-NA}; pwr=${a[2]:-NA}; g=("${a[@]:3}")
   gmin=$(printf '%s\n' "${g[@]}" | grep -E '^[0-9]+$' | sort -n | head -1)
   want_cpu=0; [ -n "${CPU_SENSOR[$h]:-}" ] && want_cpu=1
   if [ -n "${failed[$h]:-}" ] || [ -z "$gmin" ] || [ "$util" = NA ] || { [ $want_cpu -eq 1 ] && [ "$cpu" = NA ]; }; then
-    line="⚠️ $h: FAILED"; alert=1
+    line="⚠️ $h: FAILED"; alert=1; active+=("$h|down")
   else
     icon=✅
     # hot = ALL gpus of the host are at or above its threshold
-    if [ -n "${LIMIT[$h]:-}" ] && [ "$gmin" -ge "${LIMIT[$h]}" ]; then icon=🔥; alert=1; fi
+    if [ -n "${LIMIT[$h]:-}" ] && [ "$gmin" -ge "${LIMIT[$h]}" ]; then icon=🔥; alert=1; active+=("$h|hot"); fi
     line="$icon $h: "
     [ $want_cpu -eq 1 ] && line+="${cpu}°C | "
     line+="$(IFS=,; echo "${g[*]}")°C | ${util}% | ${pwr}W"
@@ -103,12 +104,30 @@ for h in "${HOSTS[@]}"; do
 done
 msg=${msg%$'\n'}
 
-# 5) decide whether to send: scheduled report, or an alert, or a manual run
+# 5) decide whether to send: a manual run, a scheduled report, or an alert whose cooldown has passed
+ALERTS_FILE=$STATE_DIR/alerts   # lines "host|reason epoch": when each active alert condition was last pushed
+declare -A LAST
+[ -r "$ALERTS_FILE" ] && while read -r k t; do LAST[$k]=$t; done < "$ALERTS_FILE"
+fresh=0
+for k in "${active[@]}"; do
+  # 30 s of slack so that a cooldown of N minutes is not missed by cron jitter
+  if [ -z "${LAST[$k]:-}" ] || [ $((now - LAST[$k])) -ge $((ALERT_COOLDOWN_MINUTES * 60 - 30)) ]; then fresh=1; fi
+done
+# remember the push time of the conditions that are still active (cleared ones are forgotten, so they alert at once next time)
+save_alerts() {   # $1 = 1 if a message went out: every active condition counts as notified now
+  [ -z "$MODE" ] || return 0
+  : > "$ALERTS_FILE.tmp"
+  for k in "${active[@]}"; do
+    t=${LAST[$k]:-}; [ "$1" = 1 ] && t=$now
+    [ -n "$t" ] && echo "$k $t" >> "$ALERTS_FILE.tmp"
+  done
+  mv "$ALERTS_FILE.tmp" "$ALERTS_FILE"
+}
 send=0
 [ -n "$MODE" ] && send=1
-[ "$ALERTS" = on ] && [ $alert -eq 1 ] && send=1
+[ "$ALERTS" = on ] && [ $fresh -eq 1 ] && send=1
 if [ "$REPORT_EVERY_MINUTES" -gt 0 ] && [ $(( (10#$(date +%H) * 60 + 10#$(date +%M)) % REPORT_EVERY_MINUTES )) -eq 0 ]; then send=1; fi
-[ $send -eq 1 ] || exit 0
+[ $send -eq 1 ] || { save_alerts 0; exit 0; }
 
 prio=$PRIO_NORMAL; [ $alert -eq 1 ] && prio=$PRIO_ALERT
 title=$(date "+%F, %T")
@@ -118,5 +137,7 @@ if [ "$MODE" = --dry-run ]; then
 fi
 if ! curl -sf --max-time 10 -H "Title: $title" -H "Priority: $prio" -d "$msg" "$NTFY_SERVER/$TOPIC" >/dev/null; then
   [ -n "$MODE" ] && echo "sending to $NTFY_SERVER failed" >&2
+  save_alerts 0
   exit 1
 fi
+save_alerts 1

@@ -5,7 +5,7 @@ Push GPU and CPU temperatures of your GPU servers to your phone with [ntfy](http
 One small bash script, run from cron on any always-on Linux machine. Every minute it queries your servers over ssh (in parallel, nothing is installed on them), keeps 7 days of samples, and sends the **5-minute average**:
 
 - a periodic report (every hour by default), and/or
-- an immediate alert when a server runs hot or cannot be reached.
+- an immediate alert when a server runs hot or cannot be reached (repeated at most every 30 minutes per server and reason, configurable).
 
 ```
 2026-10-21, 13:00:01
@@ -15,7 +15,7 @@ One small bash script, run from cron on any always-on Linux machine. Every minut
 ```
 
 Per server: `<icon> <name>: <cpu temp> | <temp of each GPU> | <mean GPU utilization> | <mean GPU power>`.
-✅ normal, 🔥 all GPUs at or above the threshold, ⚠️ the server could not be queried. Alerts have a higher ntfy priority than reports.
+✅ normal, 🔥 all GPUs at or above the threshold, ⚠️ the server could not be queried. Messages that contain a 🔥 or ⚠️ get a higher ntfy priority.
 
 ## Set it up with Claude Code
 
@@ -62,20 +62,22 @@ All settings live in `~/.config/gpu-ntfy-monitor/config` (see `config.example`; 
 | `CPU_SENSOR` | none | per-host `chip:label` from `sensors`; omit to skip the CPU |
 | `REPORT_EVERY_MINUTES` | `60` | periodic report interval, aligned to midnight; `0` = off |
 | `ALERTS` | `on` | push immediately when a host is hot or unreachable |
+| `ALERT_COOLDOWN_MINUTES` | `30` | no repeat alert within this time, per host and reason (hot / unreachable); `0` = every minute |
 | `PRIO_NORMAL` / `PRIO_ALERT` | `3` / `4` | ntfy priorities |
 | `LOG_DAYS` | `7` | days of samples kept |
 | `WINDOW_SECONDS` | `295` | averaging window |
 
 ## How it works
 
-- Samples go to `~/.local/state/gpu-ntfy-monitor/samples.csv`, one row per host per minute: `time,epoch,host,cpu,util,power,gpu temps...` (`NA` = query failed, `-` = no CPU sensor).
+- Samples go to `~/.local/state/gpu-ntfy-monitor/samples.csv`, one row per host per minute: `time,epoch,host,cpu,util,power,gpu temps...` (`NA` = query failed, `-` = no CPU sensor). `alerts` holds the last push time of each active alert reason.
 - GPU count is detected with `nvidia-smi`, so servers can have different numbers of GPUs.
+- Immediate alerts have two reasons per server: **hot** and **unreachable**. Each pair `server + reason` has its own cooldown (`alerts` file in the state directory). A reason that clears is forgotten, so if it comes back it alerts at once. A periodic report that is sent while a reason is active counts as having told you.
 - `flock` stops overlapping runs; every ssh and the push have timeouts.
 - Utilization and power are the mean over the GPUs of a server.
 
 ## Limitations
 
-- While a server stays hot or unreachable and `ALERTS=on`, you get a push every minute. Use `ALERTS=off` for reports only.
+- While a server stays hot or unreachable you are reminded every `ALERT_COOLDOWN_MINUTES` (default 30) by an alert, and by every periodic report. Use `ALERTS=off` for reports only, or `ALERT_COOLDOWN_MINUTES=0` for a push every minute.
 - The topic is the only secret. Anyone who knows it can read your messages; use a self-hosted ntfy with access control if that matters. Authenticated ntfy servers are not supported yet.
 - The monitor machine must be Linux (GNU date, `flock`).
 
