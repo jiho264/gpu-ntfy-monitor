@@ -51,7 +51,7 @@ Subscribe to your topic in the ntfy app (server `ntfy.sh` unless you self-host).
 
 ## Settings
 
-All settings live in `~/.config/gpu-ntfy-monitor/config` (see `config.example`; override the path with `GPU_NTFY_CONFIG`).
+All settings live in one config file (see `config.example`). The script looks for it in this order: `$GPU_NTFY_CONFIG`, a git-ignored `config` next to `bin/` in the repo checkout (run the script from the checkout and keep your private settings there), then `~/.config/gpu-ntfy-monitor/config`.
 
 | Setting | Default | Meaning |
 |---|---|---|

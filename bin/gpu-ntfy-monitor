@@ -4,7 +4,11 @@
 # Usage: gpu-ntfy-monitor [--test | --dry-run]
 #   --test     send the report now, regardless of the schedule
 #   --dry-run  like --test, but print the message instead of sending it
-CONFIG=${GPU_NTFY_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/gpu-ntfy-monitor/config}
+# config lookup: $GPU_NTFY_CONFIG, else "config" next to bin/ (the git-ignored file of a repo checkout), else ~/.config
+SELF_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+CONFIG=${GPU_NTFY_CONFIG:-}
+[ -n "$CONFIG" ] || { [ -r "$SELF_DIR/../config" ] && CONFIG=$SELF_DIR/../config; }
+CONFIG=${CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/gpu-ntfy-monitor/config}
 STATE_DIR=${XDG_STATE_HOME:-$HOME/.local/state}/gpu-ntfy-monitor
 MODE=${1:-}
 case "$MODE" in ""|--test|--dry-run) ;; *) echo "usage: gpu-ntfy-monitor [--test | --dry-run]" >&2; exit 2 ;; esac

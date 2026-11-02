@@ -1,4 +1,4 @@
-# gpu-ntfy-monitor settings. Copy to ~/.config/gpu-ntfy-monitor/config and edit.
+# gpu-ntfy-monitor settings. Copy to ./config in the repo checkout (git-ignored) or to ~/.config/gpu-ntfy-monitor/config, and edit.
 # This file is sourced by bash. Keep it private (chmod 600): the topic acts as a password.
 
 # ntfy server and topic. Anyone who knows the topic can read and post to it, so make it long and random,
