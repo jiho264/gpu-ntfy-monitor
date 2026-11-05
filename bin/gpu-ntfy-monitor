@@ -95,12 +95,12 @@ for h in "${HOSTS[@]}"; do
   gmin=$(printf '%s\n' "${g[@]}" | grep -E '^[0-9]+$' | sort -n | head -1)
   want_cpu=0; [ -n "${CPU_SENSOR[$h]:-}" ] && want_cpu=1
   if [ -n "${failed[$h]:-}" ] || [ -z "$gmin" ] || [ "$util" = NA ] || { [ $want_cpu -eq 1 ] && [ "$cpu" = NA ]; }; then
-    line="⚠️$h | FAILED"; alert=1; active+=("$h|down")
+    line="⚠️ $h | FAILED"; alert=1; active+=("$h|down")
   else
     icon=✅
     # hot = ALL gpus of the host are at or above its threshold
     if [ -n "${LIMIT[$h]:-}" ] && [ "$gmin" -ge "${LIMIT[$h]}" ]; then icon=🔥; alert=1; active+=("$h|hot"); fi
-    line="$icon$h | "
+    line="$icon $h | "
     [ $want_cpu -eq 1 ] && line+="${cpu} & "
     line+="$(IFS=,; echo "${g[*]}")°C | ${util}% | ${pwr}W"
   fi

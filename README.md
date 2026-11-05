@@ -9,12 +9,12 @@ One small bash script, run from cron on any always-on Linux machine. Every minut
 
 ```
 [GPU temp] 2026-10-21, 13:00:01
-✅gpu-server-1 | 61 & 42,41,40,39°C | 85% | 319W
-🔥gpu-server-2 | 58 & 77,78,76,79°C | 97% | 410W
-⚠️gpu-server-3 | FAILED
+✅ gpu-server-1 | 61 & 42,41,40,39°C | 85% | 319W
+🔥 gpu-server-2 | 58 & 77,78,76,79°C | 97% | 410W
+⚠️ gpu-server-3 | FAILED
 ```
 
-Per server: `<icon><name> | <cpu temp> & <temp of each GPU>°C | <mean GPU utilization> | <mean GPU power>` (the CPU part is left out for servers without a CPU sensor).
+Per server: `<icon> <name> | <cpu temp> & <temp of each GPU>°C | <mean GPU utilization> | <mean GPU power>` (the CPU part is left out for servers without a CPU sensor).
 ✅ normal, 🔥 all GPUs at or above the threshold, ⚠️ the server could not be queried. Messages that contain a 🔥 or ⚠️ get a higher ntfy priority.
 
 ## Set it up with Claude Code
