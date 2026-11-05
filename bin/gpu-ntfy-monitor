@@ -95,13 +95,13 @@ for h in "${HOSTS[@]}"; do
   gmin=$(printf '%s\n' "${g[@]}" | grep -E '^[0-9]+$' | sort -n | head -1)
   want_cpu=0; [ -n "${CPU_SENSOR[$h]:-}" ] && want_cpu=1
   if [ -n "${failed[$h]:-}" ] || [ -z "$gmin" ] || [ "$util" = NA ] || { [ $want_cpu -eq 1 ] && [ "$cpu" = NA ]; }; then
-    line="⚠️ $h: FAILED"; alert=1; active+=("$h|down")
+    line="⚠️$h | FAILED"; alert=1; active+=("$h|down")
   else
     icon=✅
     # hot = ALL gpus of the host are at or above its threshold
     if [ -n "${LIMIT[$h]:-}" ] && [ "$gmin" -ge "${LIMIT[$h]}" ]; then icon=🔥; alert=1; active+=("$h|hot"); fi
-    line="$icon $h: "
-    [ $want_cpu -eq 1 ] && line+="${cpu}°C | "
+    line="$icon$h | "
+    [ $want_cpu -eq 1 ] && line+="${cpu} & "
     line+="$(IFS=,; echo "${g[*]}")°C | ${util}% | ${pwr}W"
   fi
   msg+="$line"$'\n'
@@ -134,7 +134,7 @@ if [ "$REPORT_EVERY_MINUTES" -gt 0 ] && [ $(( (10#$(date +%H) * 60 + 10#$(date +
 [ $send -eq 1 ] || { save_alerts 0; exit 0; }
 
 prio=$PRIO_NORMAL; [ $alert -eq 1 ] && prio=$PRIO_ALERT
-title=$(date "+%F, %T")
+title="[GPU temp] $(date "+%F, %T")"
 if [ "$MODE" = --dry-run ]; then
   printf 'Title: %s\nPriority: %s\n%s\n' "$title" "$prio" "$msg"
   exit 0
